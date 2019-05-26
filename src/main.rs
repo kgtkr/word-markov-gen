@@ -24,29 +24,23 @@ fn main() -> Result<(), Box<std::error::Error>> {
     if let Some(matches) = matches.subcommand_matches("create") {
         let order = clap::value_t!(matches.value_of("order"), usize).unwrap_or_else(|e| e.exit());
 
-        let text = std::fs::read_to_string("english-words/words.txt")?;
-        let words = text
+        std::fs::read_to_string("english-words/words.txt")?
             .split("\n")
             .filter(|&word| word.len() > 0 && word.chars().all(|c| c.is_ascii_lowercase()))
             .map(|word| word.chars().collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-
-        let mut chain = Chain::of_order(order);
-
-        for word in words {
-            chain.feed(word);
-        }
-        chain.save("data.bin")?;
+            .fold(Chain::of_order(order), |mut chain, word| {
+                chain.feed(word);
+                chain
+            })
+            .save("data.bin")?;
     }
 
     if let Some(matches) = matches.subcommand_matches("gen") {
         let count = clap::value_t!(matches.value_of("count"), usize).unwrap_or_else(|e| e.exit());
 
-        let chain = Chain::<char>::load("data.bin")?;
-
-        for word in chain.iter_for(count) {
-            println!("{}", word.into_iter().collect::<String>());
-        }
+        Chain::<char>::load("data.bin")?
+            .iter_for(count)
+            .for_each(|word| println!("{}", word.into_iter().collect::<String>()));
     }
 
     Ok(())
