@@ -1,37 +1,16 @@
 use clap::{App, Arg, SubCommand};
-use rand::seq::SliceRandom;
-use serde_derive::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-#[derive(Debug, Clone)]
-struct DataBase {
-    data: HashMap<Option<char>, Vec<Option<char>>>,
-}
-
-impl From<DataBaseJSON> for DataBase {
-    fn from(DataBaseJSON { data }: DataBaseJSON) -> Self {
-        DataBase {
-            data: data.into_iter().collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct DataBaseJSON {
-    data: Vec<(Option<char>, Vec<Option<char>>)>,
-}
-
-impl From<DataBase> for DataBaseJSON {
-    fn from(DataBase { data }: DataBase) -> Self {
-        DataBaseJSON {
-            data: data.into_iter().collect(),
-        }
-    }
-}
+use markov::Chain;
 
 fn main() -> Result<(), Box<std::error::Error>> {
     let matches = App::new("Word Markov Gen")
-        .subcommand(SubCommand::with_name("create"))
+        .subcommand(
+            SubCommand::with_name("create").arg(
+                Arg::with_name("order")
+                    .long("order")
+                    .short("o")
+                    .default_value("1"),
+            ),
+        )
         .subcommand(
             SubCommand::with_name("gen").arg(
                 Arg::with_name("count")
@@ -42,7 +21,9 @@ fn main() -> Result<(), Box<std::error::Error>> {
         )
         .get_matches();
 
-    if let Some(_) = matches.subcommand_matches("create") {
+    if let Some(matches) = matches.subcommand_matches("create") {
+        let order = clap::value_t!(matches.value_of("order"), usize).unwrap_or_else(|e| e.exit());
+
         let text = std::fs::read_to_string("english-words/words.txt")?;
         let words = text
             .split("\n")
@@ -50,47 +31,20 @@ fn main() -> Result<(), Box<std::error::Error>> {
             .map(|word| word.chars().collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
-        let mut data = HashMap::new();
+        let mut chain = Chain::of_order(order);
 
         for word in words {
-            let mut prev = None;
-            for c in word {
-                data.entry(prev).or_insert_with(Vec::new).push(Some(c));
-                prev = Some(c);
-            }
-            data.entry(prev).or_insert_with(Vec::new).push(None);
+            chain.feed(word);
         }
-        std::fs::write(
-            "data.json",
-            serde_json::to_string(&DataBaseJSON::from(DataBase { data: data }))?,
-        )?;
+        chain.save("data.bin")?;
     }
 
     if let Some(matches) = matches.subcommand_matches("gen") {
-        let count = clap::value_t!(matches.value_of("count"), u32).unwrap_or_else(|e| e.exit());
+        let count = clap::value_t!(matches.value_of("count"), usize).unwrap_or_else(|e| e.exit());
 
-        let data = DataBase::from(serde_json::from_str::<DataBaseJSON>(
-            &std::fs::read_to_string("data.json")?,
-        )?);
+        let chain = Chain::<char>::load("data.bin")?;
 
-        for _ in 0..count {
-            let mut rng = rand::thread_rng();
-            let mut word = Vec::new();
-            let mut prev = None;
-            loop {
-                let next = data
-                    .data
-                    .get(&prev)
-                    .and_then(|v| v.choose(&mut rng))
-                    .cloned()
-                    .unwrap_or(None);
-                if let Some(next) = next {
-                    word.push(next);
-                    prev = Some(next);
-                } else {
-                    break;
-                }
-            }
+        for word in chain.iter_for(count) {
             println!("{}", word.into_iter().collect::<String>());
         }
     }
